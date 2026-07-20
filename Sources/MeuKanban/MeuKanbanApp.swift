@@ -40,14 +40,44 @@ enum TaskStatus: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum TaskPriority: String, Codable, CaseIterable, Identifiable {
+    case critical, attention, controlled
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .critical: "Crítico"; case .attention: "Atenção"; case .controlled: "Sob controle" }
+    }
+    var color: Color {
+        switch self { case .critical: .red; case .attention: .yellow; case .controlled: .green }
+    }
+}
+
 struct KanbanTask: Codable, Identifiable, Equatable {
     var id = UUID()
     var title: String
     var details: String = ""
     var projectID: UUID
     var status: TaskStatus = .todo
+    var priority: TaskPriority = .controlled
     var dueDate: Date?
     var createdAt = Date()
+
+    init(id: UUID = UUID(), title: String, details: String = "", projectID: UUID, status: TaskStatus = .todo, priority: TaskPriority = .controlled, dueDate: Date? = nil, createdAt: Date = Date()) {
+        self.id = id; self.title = title; self.details = details; self.projectID = projectID
+        self.status = status; self.priority = priority; self.dueDate = dueDate; self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, details, projectID, status, priority, dueDate, createdAt }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        details = try container.decodeIfPresent(String.self, forKey: .details) ?? ""
+        projectID = try container.decode(UUID.self, forKey: .projectID)
+        status = try container.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .todo
+        priority = try container.decodeIfPresent(TaskPriority.self, forKey: .priority) ?? .controlled
+        dueDate = try container.decodeIfPresent(Date.self, forKey: .dueDate)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
 }
 
 struct Project: Codable, Identifiable, Equatable {
@@ -101,10 +131,10 @@ final class KanbanStore: ObservableObject {
         selection = .project(project.id)
     }
 
-    func addTask(title: String, details: String, projectID: UUID, dueDate: Date?) {
+    func addTask(title: String, details: String, projectID: UUID, priority: TaskPriority, dueDate: Date?) {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
-        data.tasks.append(KanbanTask(title: cleanTitle, details: details, projectID: projectID, dueDate: dueDate))
+        data.tasks.append(KanbanTask(title: cleanTitle, details: details, projectID: projectID, priority: priority, dueDate: dueDate))
     }
 
     func deleteTask(_ task: KanbanTask) { data.tasks.removeAll { $0.id == task.id } }
@@ -267,11 +297,15 @@ struct TaskCard: View {
     let task: KanbanTask
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Circle().fill(task.priority.color).frame(width: 9, height: 9)
+                Text(task.priority.title).font(.caption.weight(.medium)).foregroundStyle(task.priority.color)
+            }
             Text(task.title).fontWeight(.semibold).fixedSize(horizontal: false, vertical: true)
             if !task.details.isEmpty { Text(task.details).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             HStack { if let date = task.dueDate { Label(date.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button(role: .destructive) { store.deleteTask(task) } label: { Image(systemName: "trash") }.buttonStyle(.borderless).opacity(0.55) }
         }
-        .padding(12).background(.background, in: RoundedRectangle(cornerRadius: 12)).shadow(color: .black.opacity(0.07), radius: 3, y: 1)
+        .padding(12).background(.background, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(task.priority.color.opacity(0.55), lineWidth: 1)).shadow(color: .black.opacity(0.07), radius: 3, y: 1)
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture(count: 2) { store.taskBeingEdited = task }
     }
@@ -287,8 +321,8 @@ struct NewProjectSheet: View {
 struct NewTaskSheet: View {
     @EnvironmentObject private var store: KanbanStore
     @Environment(\.dismiss) private var dismiss
-    @State private var title = ""; @State private var details = ""; @State private var projectID: UUID?; @State private var hasDate = false; @State private var dueDate = Date()
-    var body: some View { VStack(alignment: .leading, spacing: 14) { Text("Nova tarefa").font(.title2.bold()); TextField("Título", text: $title); TextField("Detalhes (opcional)", text: $details); Picker("Projeto", selection: $projectID) { Text("Selecione").tag(UUID?.none); ForEach(store.data.projects) { Text($0.name).tag(Optional($0.id)) } }; Toggle("Definir prazo", isOn: $hasDate); if hasDate { DatePicker("Prazo", selection: $dueDate, displayedComponents: .date) }; HStack { Spacer(); Button("Cancelar") { dismiss() }; Button("Adicionar") { if let id = projectID { store.addTask(title: title, details: details, projectID: id, dueDate: hasDate ? dueDate : nil); dismiss() } }.buttonStyle(.borderedProminent).disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || projectID == nil) } }.padding(24).frame(width: 430) }
+    @State private var title = ""; @State private var details = ""; @State private var projectID: UUID?; @State private var priority: TaskPriority = .controlled; @State private var hasDate = false; @State private var dueDate = Date()
+    var body: some View { VStack(alignment: .leading, spacing: 14) { Text("Nova tarefa").font(.title2.bold()); TextField("Título", text: $title); TextField("Detalhes (opcional)", text: $details); Picker("Projeto", selection: $projectID) { Text("Selecione").tag(UUID?.none); ForEach(store.data.projects) { Text($0.name).tag(Optional($0.id)) } }; Picker("Sinalização", selection: $priority) { ForEach(TaskPriority.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented); Toggle("Definir prazo", isOn: $hasDate); if hasDate { DatePicker("Prazo", selection: $dueDate, displayedComponents: .date) }; HStack { Spacer(); Button("Cancelar") { dismiss() }; Button("Adicionar") { if let id = projectID { store.addTask(title: title, details: details, projectID: id, priority: priority, dueDate: hasDate ? dueDate : nil); dismiss() } }.buttonStyle(.borderedProminent).disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || projectID == nil) } }.padding(24).frame(width: 430) }
 }
 
 struct EditTaskSheet: View {
@@ -299,6 +333,7 @@ struct EditTaskSheet: View {
     @State private var details: String
     @State private var projectID: UUID
     @State private var status: TaskStatus
+    @State private var priority: TaskPriority
     @State private var hasDate: Bool
     @State private var dueDate: Date
 
@@ -308,6 +343,7 @@ struct EditTaskSheet: View {
         _details = State(initialValue: task.details)
         _projectID = State(initialValue: task.projectID)
         _status = State(initialValue: task.status)
+        _priority = State(initialValue: task.priority)
         _hasDate = State(initialValue: task.dueDate != nil)
         _dueDate = State(initialValue: task.dueDate ?? Date())
     }
@@ -319,6 +355,7 @@ struct EditTaskSheet: View {
             TextField("Detalhes (opcional)", text: $details)
             Picker("Projeto", selection: $projectID) { ForEach(store.data.projects) { Text($0.name).tag($0.id) } }
             Picker("Status", selection: $status) { ForEach(TaskStatus.allCases) { Text($0.title).tag($0) } }
+            Picker("Sinalização", selection: $priority) { ForEach(TaskPriority.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
             Toggle("Definir prazo", isOn: $hasDate)
             if hasDate { DatePicker("Prazo", selection: $dueDate, displayedComponents: .date) }
             HStack {
@@ -330,6 +367,7 @@ struct EditTaskSheet: View {
                     edited.details = details
                     edited.projectID = projectID
                     edited.status = status
+                    edited.priority = priority
                     edited.dueDate = hasDate ? dueDate : nil
                     store.updateTask(edited)
                     dismiss()
