@@ -1,0 +1,10 @@
+# Dados pessoais e locais
+kanban.json
+
+# Arquivos e produtos de compilação
+.DS_Store
+.build/
+dist/
+
+# Ambiente do Swift Package Manager
+.swiftpm/
