@@ -145,15 +145,16 @@ final class KanbanStore: ObservableObject {
         data.updatedAt = Date()
     }
 
-    /// Atualiza a cor das tarefas conforme o prazo, sem reduzir uma
-    /// sinalização já elevada. É seguro executar esta rotina repetidamente.
+    /// Atualiza a cor apenas de tarefas abertas conforme o prazo, sem reduzir
+    /// uma sinalização já elevada. Tarefas concluídas preservam sua cor.
     func refreshPriorities(for now: Date = Date()) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         var changed = false
 
         for index in data.tasks.indices {
-            guard let dueDate = data.tasks[index].dueDate else { continue }
+            guard data.tasks[index].status != .done,
+                  let dueDate = data.tasks[index].dueDate else { continue }
             let dueDay = calendar.startOfDay(for: dueDate)
 
             if dueDay < today, data.tasks[index].priority != .critical {
