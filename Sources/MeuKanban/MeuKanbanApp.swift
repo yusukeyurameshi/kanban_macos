@@ -145,6 +145,29 @@ final class KanbanStore: ObservableObject {
         data.updatedAt = Date()
     }
 
+    /// Atualiza a cor das tarefas conforme o prazo, sem reduzir uma
+    /// sinalização já elevada. É seguro executar esta rotina repetidamente.
+    func refreshPriorities(for now: Date = Date()) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        var changed = false
+
+        for index in data.tasks.indices {
+            guard let dueDate = data.tasks[index].dueDate else { continue }
+            let dueDay = calendar.startOfDay(for: dueDate)
+
+            if dueDay < today, data.tasks[index].priority != .critical {
+                data.tasks[index].priority = .critical
+                changed = true
+            } else if calendar.isDate(dueDay, inSameDayAs: today), data.tasks[index].priority == .controlled {
+                data.tasks[index].priority = .attention
+                changed = true
+            }
+        }
+
+        if changed { data.updatedAt = now }
+    }
+
     private func load() {
         let url = storageURL
         if let decoded = decode(from: url) { data = decoded; return }
@@ -215,7 +238,16 @@ struct ContentView: View {
         .sheet(isPresented: $store.presentNewProject) { NewProjectSheet() }
         .sheet(isPresented: $store.presentNewTask) { NewTaskSheet() }
         .sheet(item: $store.taskBeingEdited) { EditTaskSheet(task: $0) }
-        .task { await updater.checkForUpdate() }
+        .task {
+            store.refreshPriorities()
+            await updater.checkForUpdate()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1_800))
+                guard !Task.isCancelled else { break }
+                store.refreshPriorities()
+            }
+        }
         .alert("Nova versão disponível", isPresented: $updater.updateAvailable) {
             Button("Agora") { Task { await updater.update() } }
             Button("Depois", role: .cancel) {}
